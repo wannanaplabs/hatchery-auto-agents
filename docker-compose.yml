@@ -1,0 +1,173 @@
+# ============================================================
+# Hatchery Auto-Agents — Docker Compose
+# ============================================================
+# Usage:
+#   cp .env.shared .env.shared.real  # fill in real values
+#   docker compose up -d
+#   docker compose logs -f minimax-agent
+# ============================================================
+
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------
+  # MiniMax Agent — fast queue cleaner (simple tasks)
+  # ----------------------------------------------------------------
+  minimax-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_TYPE: minimax
+    container_name: hatchery-minimax-agent
+    env_file:
+      - .env.shared
+      - env/minimax.env
+    environment:
+      - AGENT_ENV_FILE=/app/agents/minimax/config.env
+    ports:
+      - "8201:8201"
+    volumes:
+      - ./agents/minimax:/app/agents/minimax:ro
+      - ./shared:/app/shared:ro
+      - agent-repos:/home/app/repos
+    networks:
+      - hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8201/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ----------------------------------------------------------------
+  # Claude Code Agent — complex coding tasks
+  # ----------------------------------------------------------------
+  claude-code-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_TYPE: claude-code
+    container_name: hatchery-claude-code-agent
+    env_file:
+      - .env.shared
+      - env/claude-code.env
+    environment:
+      - AGENT_ENV_FILE=/app/agents/claude-code/config.env
+    ports:
+      - "8202:8202"
+    volumes:
+      - ./agents/claude-code:/app/agents/claude-code:ro
+      - ./shared:/app/shared:ro
+      - agent-repos:/home/app/repos
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker
+    networks:
+      - hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8202/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ----------------------------------------------------------------
+  # Qwen Agent — local Ollama brain
+  # ----------------------------------------------------------------
+  qwen-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_TYPE: qwen
+    container_name: hatchery-qwen-agent
+    env_file:
+      - .env.shared
+      - env/qwen.env
+    environment:
+      - AGENT_ENV_FILE=/app/agents/qwen/config.env
+    ports:
+      - "8203:8203"
+    volumes:
+      - ./agents/qwen:/app/agents/qwen:ro
+      - ./shared:/app/shared:ro
+      - agent-repos:/home/app/repos
+    networks:
+      - hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8203/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ----------------------------------------------------------------
+  # DeepSeek Agent — local Ollama brain
+  # ----------------------------------------------------------------
+  deepseek-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_TYPE: deepseek
+    container_name: hatchery-deepseek-agent
+    env_file:
+      - .env.shared
+      - env/deepseek.env
+    environment:
+      - AGENT_ENV_FILE=/app/agents/deepseek/config.env
+    ports:
+      - "8204:8204"
+    volumes:
+      - ./agents/deepseek:/app/agents/deepseek:ro
+      - ./shared:/app/shared:ro
+      - agent-repos:/home/app/repos
+    networks:
+      - hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8204/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ----------------------------------------------------------------
+  # Gemma Agent — Google AI Studio brain
+  # ----------------------------------------------------------------
+  gemma-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_TYPE: gemma
+    container_name: hatchery-gemma-agent
+    env_file:
+      - .env.shared
+      - env/gemma.env
+    environment:
+      - AGENT_ENV_FILE=/app/agents/gemma/config.env
+    ports:
+      - "8205:8205"
+    volumes:
+      - ./agents/gemma:/app/agents/gemma:ro
+      - ./shared:/app/shared:ro
+      - agent-repos:/home/app/repos
+    networks:
+      - hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8205/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ----------------------------------------------------------------
+# Named volumes
+# ----------------------------------------------------------------
+volumes:
+  agent-repos:
+    driver: local
+
+networks:
+  hatchery-net:
+    driver: bridge

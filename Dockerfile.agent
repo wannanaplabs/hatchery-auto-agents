@@ -1,0 +1,107 @@
+# ============================================================
+# Multi-stage Dockerfile for all Hatchery agent types
+# ============================================================
+# Build args:
+#   AGENT_TYPE: minimax | claude-code | qwen | deepseek | gemma
+#
+# The final stage installs only what's needed per agent type.
+# ============================================================
+
+# ----------------------------------------------------------------
+# Stage 1: Builder — install all dependencies
+# ----------------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl gh build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js for Claude Code CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI (no --version pin — gets latest)
+RUN npm install -g @anthropic-ai/claude-code \
+    || npm install -g anthropic
+
+WORKDIR /app
+
+# ----------------------------------------------------------------
+# Stage 2: Base agent image
+# ----------------------------------------------------------------
+FROM python:3.11-slim AS base-agent
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl gh build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash app
+WORKDIR /home/app
+
+# Copy shared libraries
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY shared/ /home/app/shared/
+
+# Copy agent dirs (will be overridden per service in compose)
+RUN mkdir -p /home/app/agents
+
+# Flask for webhook receiver
+RUN pip install --quiet flask
+
+# ----------------------------------------------------------------
+# Stage 3: Minimax agent
+# ----------------------------------------------------------------
+FROM base-agent AS minimax-agent
+COPY agents/minimax/ /home/app/agents/minimax/
+COPY agents/minimax/config.env /home/app/agents/minimax/config.env
+RUN chmod +x /home/app/agents/minimax/run.sh
+ENV AGENT_ENV_FILE=/home/app/agents/minimax/config.env
+CMD ["python3", "-m", "agents.minimax.agent"]
+
+# ----------------------------------------------------------------
+# Stage 4: Claude Code agent
+# ----------------------------------------------------------------
+FROM base-agent AS claude-code-agent
+
+# Install Node + Claude Code CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code
+
+COPY agents/claude-code/ /home/app/agents/claude-code/
+COPY agents/claude-code/config.env /home/app/agents/claude-code/config.env
+RUN chmod +x /home/app/agents/claude-code/run.sh
+ENV AGENT_ENV_FILE=/home/app/agents/claude-code/config.env
+CMD ["python3", "-m", "agents.claude-code.agent"]
+
+# ----------------------------------------------------------------
+# Stage 5: Qwen agent (Ollama — local, no extra deps needed)
+# ----------------------------------------------------------------
+FROM base-agent AS qwen-agent
+COPY agents/qwen/ /home/app/agents/qwen/
+COPY agents/qwen/config.env /home/app/agents/qwen/config.env
+RUN chmod +x /home/app/agents/qwen/run.sh
+ENV AGENT_ENV_FILE=/home/app/agents/qwen/config.env
+CMD ["python3", "-m", "agents.qwen.agent"]
+
+# ----------------------------------------------------------------
+# Stage 6: DeepSeek agent (Ollama — local)
+# ----------------------------------------------------------------
+FROM base-agent AS deepseek-agent
+COPY agents/deepseek/ /home/app/agents/deepseek/
+COPY agents/deepseek/config.env /home/app/agents/deepseek/config.env
+RUN chmod +x /home/app/agents/deepseek/run.sh
+ENV AGENT_ENV_FILE=/home/app/agents/deepseek/config.env
+CMD ["python3", "-m", "agents.deepseek.agent"]
+
+# ----------------------------------------------------------------
+# Stage 7: Gemma agent
+# ----------------------------------------------------------------
+FROM base-agent AS gemma-agent
+COPY agents/gemma/ /home/app/agents/gemma/
+COPY agents/gemma/config.env /home/app/agents/gemma/config.env
+RUN chmod +x /home/app/agents/gemma/run.sh
+ENV AGENT_ENV_FILE=/home/app/agents/gemma/config.env
+CMD ["python3", "-m", "agents.gemma.agent"]
