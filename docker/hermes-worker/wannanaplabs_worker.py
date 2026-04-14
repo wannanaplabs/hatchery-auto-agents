@@ -201,9 +201,18 @@ def submit_for_qa(task_id, note):
 
 
 def release_task(task_id, reason):
-    """Release a claimed task back to the pool."""
+    """Release a claimed task back to the pool.
+
+    Uses PATCH status=ready instead of POST /release because the latter sets
+    last_failed_by=<agent_id>, which makes the task invisible to the SAME
+    agent via /tasks/available. Since all workers share the Goop identity,
+    /release would create a perma-block. PATCH status=ready has no blame."""
     try:
-        hatchery_api("POST", f"agent/tasks/{task_id}/release", {"reason": reason[:200]})
+        hatchery_api("PATCH", f"agent/tasks/{task_id}", {
+            "status": "ready",
+            "comment": f"released by {WORKER_NAME}: {reason[:200]}",
+            "assignee_agent_id": None,
+        })
         logger.info(f"Released task {task_id}: {reason[:80]}")
     except Exception as e:
         logger.warning(f"Release failed for {task_id}: {e}")
@@ -212,7 +221,7 @@ def release_task(task_id, reason):
 def request_human(task_id, reason):
     """Escalate an ambiguous task to a human."""
     try:
-        hatchery_api("POST", f"agent/tasks/{task_id}/request-human", {"reason": reason[:200]})
+        hatchery_api("POST", f"agent/tasks/{task_id}/request-human", {"comment": reason[:200]})
         logger.info(f"Requested human review on {task_id}: {reason[:80]}")
     except Exception as e:
         logger.warning(f"request-human failed for {task_id}: {e}")
