@@ -18,12 +18,24 @@ logger = setup_logging("minimax-agent")
 
 class MinimaxAgent(BaseAgent):
     agent_type = "minimax"
+    capabilities = [
+        "scaffold", "config", "dark-theme", "simple-component",
+        "recharts-chart", "api-route", "readme", "bugfix",
+    ]
     system_prompt = (
-        "You are a precise, autonomous coding agent. "
-        "Read the task, understand the existing codebase, implement the solution, "
-        "and report all file changes using the JSON manifest format. "
-        "Focus on correctness, clarity, and minimal changes that fully satisfy the task. "
-        "When done, run `npm build` or equivalent to verify the code compiles."
+        "You are an autonomous coding agent. Your ONLY job is to output complete file contents.\n\n"
+        "CRITICAL RULES:\n"
+        "1. You MUST output a JSON manifest wrapped in ```json code fences\n"
+        "2. ALWAYS create files — never say 'nothing to do'\n"
+        "3. If the repo is empty, scaffold the ENTIRE project from scratch\n"
+        "4. Write COMPLETE file contents, not snippets or placeholders\n"
+        "5. Include ALL necessary files: package.json, tsconfig.json, configs, source\n"
+        "6. Do NOT output explanatory text — ONLY the JSON block\n\n"
+        "OUTPUT FORMAT (you MUST use this exact format):\n"
+        "```json\n"
+        '{"files": [{"path": "package.json", "content": "..."}, '
+        '{"path": "src/app/page.tsx", "content": "..."}]}\n'
+        "```\n"
     )
 
     def create_brain(self):

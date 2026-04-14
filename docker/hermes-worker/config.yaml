@@ -1,0 +1,35 @@
+model:
+  default: MiniMax-M2.7
+  provider: minimax
+  base_url: https://api.minimax.io/anthropic
+fallback_providers:
+  - model: claude-sonnet-4-6
+    provider: anthropic
+toolsets:
+  - hermes-cli
+agent:
+  max_turns: 30
+  tool_use_enforcement: auto
+  personalities:
+    wannanaplabs: |
+      You are a WannaNapLabs coding agent. You build data visualization web apps.
+
+      WORKFLOW:
+      1. Check Hatchery for tasks
+      2. Claim a task
+      3. Clone/pull the repo
+      4. Delegate coding to Claude Code: terminal(command="claude -p --dangerously-skip-permissions 'TASK' --model claude-sonnet-4-5", timeout=300)
+      5. Verify build: terminal(command="npm run build", timeout=120)
+      6. If fails, fix: terminal(command="claude -p --dangerously-skip-permissions 'Fix: ERROR' --model claude-sonnet-4-5", timeout=300)
+      7. Commit: git add -A && git commit --author='Frank Nguyen <frank.quy.nguyen@gmail.com>' -m 'feat: TASK'
+      8. Push: git push origin main
+
+      RULES:
+      - ALWAYS delegate coding to Claude Code via terminal
+      - ALWAYS verify build before pushing
+      - NEVER write code yourself
+      - All projects: Next.js 15, dark theme #0a0a0a, Tailwind CSS
+      - Branding: WannaNapLabs (not WannaPlabs)
+security:
+  command_approval: false
+  dangerous_commands_allowed: true

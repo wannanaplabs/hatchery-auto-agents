@@ -87,19 +87,21 @@ class GitManager:
             cwd=self._repo_dir, capture_output=True, text=True
         )
         if r.returncode != 0:
-            logger.warning(f"Nothing to commit: {r.stderr.decode()[:100]}")
+            logger.warning(f"Nothing to commit: {r.stderr[:100]}")
         return r
 
     def push(self, remote: str = "origin", set_upstream: bool = True) -> subprocess.CompletedProcess:
         """Push current branch to remote."""
         if not self._repo_dir:
             raise RuntimeError("Must call clone_or_pull first")
-        cmd = ["git", "push", remote]
+        cmd = ["git", "push"]
         if set_upstream:
-            cmd.extend(["-u", remote])
+            cmd.extend(["-u", remote, "HEAD"])
+        else:
+            cmd.append(remote)
         r = subprocess.run(cmd, cwd=self._repo_dir, capture_output=True, text=True)
         if r.returncode != 0:
-            logger.error(f"Push failed: {r.stderr.decode()[:200]}")
+            logger.error(f"Push failed: {r.stderr[:200]}")
         return r
 
     def open_pr(self, title: str, body: str,
@@ -115,10 +117,10 @@ class GitManager:
             cwd=self._repo_dir, capture_output=True, text=True
         )
         if r.returncode != 0:
-            logger.error(f"PR create failed: {r.stderr.decode()[:200]}")
-            return {"error": r.stderr.decode()}
+            logger.error(f"PR create failed: {r.stderr[:200]}")
+            return {"error": r.stderr}
         # gh outputs PR URL on success
-        return {"url": r.stdout.decode().strip()}
+        return {"url": r.stdout.strip()}
 
     def _get_repo_slug(self) -> str:
         """Extract 'owner/repo' from current repo remote URL."""
@@ -128,7 +130,7 @@ class GitManager:
             ["git", "remote", "get-url", "origin"],
             cwd=self._repo_dir, capture_output=True, text=True
         )
-        url = r.stdout.decode().strip()
+        url = r.stdout.strip()
         # https://github.com/wannanaplabs/repo.git → wannanaplabs/repo
         parts = url.rstrip("/").replace(".git", "").split("/")
         return f"{parts[-2]}/{parts[-1]}"
@@ -137,3 +139,83 @@ class GitManager:
         """Run an arbitrary shell command in the repo (or cwd)."""
         return subprocess.run(cmd, cwd=cwd or self._repo_dir,
                               capture_output=True, text=True)
+
+    # ---- Repo Creation ----
+
+    def create_repo(self, org: str, repo_name: str, description: str = "",
+                    private: bool = True) -> dict:
+        """
+        Create a new GitHub repo under the given org using the GitHub API.
+        Returns dict with 'url' on success, 'error' on failure.
+        """
+        import urllib.request, json
+
+        url = f"https://api.github.com/orgs/{org}/repos"
+        payload = json.dumps({
+            "name": repo_name,
+            "description": description,
+            "private": private,
+            "auto_init": False,
+            "allow_squash_merge": True,
+            "allow_merge_commit": True,
+        }).encode()
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={
+                "Authorization": f"token {self.github_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/vnd.github+json",
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                repo_url = data.get("html_url", "")
+                logger.info(f"Created GitHub repo: {repo_url}")
+                return {"url": repo_url, "full_name": data.get("full_name", "")}
+        except urllib.error.HTTPError as e:
+            body = e.read().decode() if e.fp else ""
+            logger.error(f"Failed to create repo {org}/{repo_name}: {e.code} {body[:200]}")
+            return {"error": f"{e.code}: {body[:200]}"}
+
+    def init_and_push(self, local_dir: Path, org: str, repo_name: str,
+                      description: str = "", branch: str = "main",
+                      private: bool = True) -> Optional[Path]:
+        """
+        Initialize a git repo in local_dir, create GitHub repo, and push.
+        Returns the local Path on success, None on failure.
+        """
+        # Create GitHub repo
+        result = self.create_repo(org, repo_name, description, private)
+        if "error" in result:
+            logger.error(f"Cannot create GitHub repo: {result['error']}")
+            return None
+
+        github_url = f"https://github.com/{org}/{repo_name}.git"
+
+        # Init git if not already
+        if not (local_dir / ".git").exists():
+            subprocess.run(["git", "init"], cwd=local_dir, check=True)
+            subprocess.run(["git", "remote", "add", "origin", github_url],
+                          cwd=local_dir, check=True)
+
+        subprocess.run(["git", "checkout", "-b", branch], cwd=local_dir, check=False)
+        subprocess.run(["git", "add", "."], cwd=local_dir, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"Initial commit: {description or repo_name}"],
+            cwd=local_dir, check=True
+        )
+        # Push with token auth
+        push_url = f"https://{self.github_token}@github.com/{org}/{repo_name}.git"
+        r = subprocess.run(
+            ["git", "push", "-u", push_url, f"HEAD:{branch}"],
+            cwd=local_dir, capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            logger.error(f"Push failed: {r.stderr}")
+            return None
+
+        self._repo_dir = local_dir
+        return local_dir

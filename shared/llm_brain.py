@@ -71,7 +71,7 @@ class MiniMaxBrain(LLMBrain):
             method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read())
                 return data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
@@ -109,7 +109,7 @@ class OllamaBrain(LLMBrain):
             method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=300) as resp:
                 data = json.loads(resp.read())
                 return data["message"]["content"].strip()
         except urllib.error.HTTPError as e:
@@ -158,16 +158,104 @@ class GeminiBrain(LLMBrain):
 # -----------------------------------------------------------------------
 
 class ClaudeCodeBrain(LLMBrain):
-    """Uses `claude --print` to pipe prompts through Claude Code CLI."""
-    def __init__(self, api_key: str, model: str, mcp_config: Optional[str] = None):
+    """
+    Claude Code CLI brain with two modes:
+
+    1. Agent mode (default): Runs `claude -p` in the repo directory with full
+       agent capabilities — file reading, writing, shell execution, iteration.
+       Claude Code handles files directly; no CodeParser needed.
+
+    2. Print mode (fallback): Runs `claude --print` for single-shot text
+       generation when agent mode is not needed.
+
+    Set `agentic=True` (default) for agent mode.
+    """
+    def __init__(self, api_key: str, model: str,
+                 mcp_config: Optional[str] = None,
+                 agentic: bool = True,
+                 timeout: int = 600):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self.model = model
-        self.mcp_config = mcp_config  # path to hatchery MCP config
+        self.mcp_config = mcp_config
+        self.agentic = agentic
+        # Flag so BaseAgent knows this brain writes files itself
+        self.is_agentic = agentic
+        self.timeout = timeout  # 10 min default for agentic tasks
         self._env = os.environ.copy()
+        self._cwd = None  # Set by BaseAgent before calling complete()
+
+    def set_cwd(self, cwd: str):
+        """Set working directory for agent mode (repo directory)."""
+        self._cwd = cwd
 
     def complete(self, prompt: str, system: str = "",
                 max_tokens: int = 4096) -> str:
-        # Build the full prompt with system instruction
+        if self.agentic:
+            return self._complete_agentic(prompt, system)
+        return self._complete_print(prompt, system)
+
+    def _complete_agentic(self, prompt: str, system: str = "") -> str:
+        """
+        Run Claude Code in full agent mode (-p flag).
+        Claude reads files, writes code, runs commands, iterates on errors.
+        Returns the conversation output (for logging/status only — files
+        are already written to disk by Claude).
+        """
+        import subprocess
+
+        # Build the task prompt — system prompt becomes part of the instruction
+        full_prompt = prompt
+        if system:
+            full_prompt = f"{system}\n\n---\n\n{full_prompt}"
+
+        cmd = [
+            "claude",
+            "-p",                              # Non-interactive mode (still has full tool access)
+            "--dangerously-skip-permissions",   # Autonomous — no confirmation prompts
+            "--output-format", "text",
+            "--model", self.model,
+        ]
+        if self.mcp_config:
+            cmd += ["--mcp-config", self.mcp_config]
+
+        env = self._env.copy()
+        if self.api_key:
+            env["ANTHROPIC_API_KEY"] = self.api_key
+
+        cwd = self._cwd or os.getcwd()
+        logger.info(f"Claude Code agent mode: cwd={cwd}, timeout={self.timeout}s")
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=full_prompt.encode(),
+                capture_output=True,
+                timeout=self.timeout,
+                env=env,
+                cwd=cwd,
+            )
+            stdout = proc.stdout.decode().strip()
+            stderr = proc.stderr.decode().strip()
+
+            if proc.returncode != 0:
+                logger.error(f"Claude Code agent failed (rc={proc.returncode}): "
+                             f"{stderr[:500]}")
+            else:
+                logger.info(f"Claude Code agent completed ({len(stdout)} chars output)")
+
+            if stderr:
+                logger.debug(f"Claude Code stderr: {stderr[:300]}")
+
+            return stdout
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Claude Code agent timed out after {self.timeout}s")
+            raise
+
+    def _complete_print(self, prompt: str, system: str = "") -> str:
+        """Fallback: single-shot text generation via --print."""
+        import subprocess
+
         full_prompt = prompt
         if system:
             full_prompt = f"{system}\n\n{full_prompt}"
@@ -175,13 +263,12 @@ class ClaudeCodeBrain(LLMBrain):
         cmd = [
             "claude", "--print",
             "--dangerously-skip-permissions",
-            f"--output-format=text",
+            "--output-format", "text",
             "--model", self.model,
         ]
         if self.mcp_config:
             cmd += ["--mcp-config", self.mcp_config]
 
-        import subprocess
         env = self._env.copy()
         if self.api_key:
             env["ANTHROPIC_API_KEY"] = self.api_key
@@ -190,14 +277,15 @@ class ClaudeCodeBrain(LLMBrain):
             proc = subprocess.run(
                 cmd,
                 input=full_prompt.encode(),
-                capture_output=True, timeout=60,
+                capture_output=True, timeout=120,
                 env=env,
+                cwd=self._cwd,
             )
             if proc.returncode != 0:
                 logger.error(f"Claude Code stderr: {proc.stderr.decode()[:200]}")
             return proc.stdout.decode().strip()
         except subprocess.TimeoutExpired:
-            logger.error("Claude Code timed out after 60s")
+            logger.error("Claude Code --print timed out")
             raise
 
 # -----------------------------------------------------------------------

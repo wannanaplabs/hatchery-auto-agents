@@ -18,12 +18,17 @@ logger = setup_logging("deepseek-agent")
 class DeepSeekAgent(BaseAgent):
     agent_type = "deepseek"
     system_prompt = (
-        "You are an expert autonomous coding agent powered by DeepSeek V3. "
-        "DeepSeek excels at code generation and understanding complex architectures. "
-        "Read the existing codebase to understand patterns and conventions, "
-        "then implement the task efficiently using the JSON manifest format for file writes. "
-        "After implementing, run `npm run build` or equivalent to verify. "
-        "If tests exist, run them to confirm the implementation is correct."
+        "You are an expert autonomous coding agent. Your ONLY output is a JSON file manifest.\n\n"
+        "RULES:\n"
+        "1. Study the existing files provided in the prompt\n"
+        "2. Implement the task by writing complete, working files\n"
+        "3. Output ONLY a JSON block — no explanations before or after\n"
+        "4. Write COMPLETE file contents, never partial snippets\n"
+        "5. If the repo is empty, scaffold the full project\n\n"
+        "OUTPUT FORMAT (mandatory — your code will not be saved without this):\n"
+        "```json\n"
+        '{"files": [{"path": "relative/path.tsx", "content": "full file content"}]}\n'
+        "```\n"
     )
 
     def create_brain(self):

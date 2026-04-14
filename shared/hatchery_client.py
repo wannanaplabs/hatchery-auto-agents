@@ -34,7 +34,14 @@ class HatcheryClient:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             body = e.read().decode() if e.fp else ""
-            logger.error(f"HTTP {e.code} on {method} {path}: {body[:200]}")
+            # 429 rate-limit is expected and handled by callers — log at DEBUG
+            # to avoid spam. 400/401/500/etc. are real errors, log at ERROR.
+            if e.code == 429:
+                logger.debug(f"HTTP 429 on {method} {path}: {body[:200]}")
+            else:
+                logger.error(f"HTTP {e.code} on {method} {path}: {body[:200]}")
+            # Attach the body to the exception so callers can inspect it
+            e.response_body = body
             raise
 
     # -----------------------------------------------------------------
@@ -42,24 +49,21 @@ class HatcheryClient:
     # -----------------------------------------------------------------
 
     def register(self, agent_config: "AgentConfig") -> dict:
-        """Register agent with Hatchery. Returns agent_api_key."""
-        return self._request("POST", "agent/register", {
-            "agent_id": agent_config.agent_id,
-            "agent_type": agent_config.agent_type,
-            "name": agent_config.agent_name,
-            "webhook_url": agent_config.webhook_url,
-            "capabilities": ["git", "coding", "shell", "browser"],
-            "llm_provider": agent_config.llm_provider,
-            "llm_model": agent_config.llm_model,
-            "status": "ready",
+        """Register agent webhook with Hatchery platform. Returns webhook config."""
+        return self._request("PUT", "agent/webhook", {
+            "url": agent_config.webhook_url,
+            "event_types": [
+                "message.received", "task.assigned", "conflict.raised",
+                "ack.required", "human.responded",
+            ],
         })
 
     def heartbeat(self, agent_id: str, status: str = "alive",
                   current_task_id: Optional[str] = None,
                   progress_pct: Optional[int] = None) -> dict:
-        return self._request("POST", f"agent/{agent_id}/heartbeat", {
+        return self._request("POST", "agent/checkin", {
             "status": status,
-            "current_task_id": current_task_id,
+            "task_id": current_task_id,
             "progress_pct": progress_pct,
         })
 
@@ -87,6 +91,16 @@ class HatcheryClient:
     def get_context(self) -> dict:
         """Get current agent context (current task, workspace state)."""
         return self._request("GET", "agent/context")
+
+    def reset_session(self) -> dict:
+        """Reset the agent session by calling GET /context (resets iteration counter)."""
+        try:
+            data = self._request("GET", "agent/context")
+            logger.info("Session reset successfully")
+            return data
+        except Exception as e:
+            logger.warning(f"Session reset failed: {e}")
+            return {}
 
     # -----------------------------------------------------------------
     # Messaging
@@ -161,6 +175,28 @@ class HatcheryClient:
         """
         data = self._request("GET", f"agent/messages/threads/{thread_id}")
         return data.get("messages", [])
+
+    def get_notifications(self) -> list[dict]:
+        """
+        Poll for pending webhook deliveries (notifications) that couldn't be
+        delivered directly (e.g. agent behind NAT). Call every 30s.
+        Returns list of notification objects with event type + payload.
+        """
+        data = self._request("GET", "agent/notifications")
+        return data.get("notifications", [])
+
+    def acknowledge_notification(self, delivery_id: str,
+                                   response: str = "",
+                                   status: str = "acknowledged") -> dict:
+        """
+        Acknowledge a webhook notification. For message.received events,
+        the response is forwarded to the originating agent as a reply.
+        """
+        return self._request(
+            "POST",
+            f"agent/webhooks/{delivery_id}/acknowledge",
+            {"response": response, "status": status}
+        )
 
     def checkin(self, agent_id: str, status: str,
                 task_id: Optional[str] = None,

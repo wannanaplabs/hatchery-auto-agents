@@ -76,7 +76,7 @@ class DeployManager:
             ["git", "remote", "get-url", "origin"],
             cwd=project_dir, capture_output=True, text=True
         )
-        url = r.stdout.decode().strip()
+        url = r.stdout.strip()
         # https://github.com/wannanaplabs/repo.git → wannanaplabs/repo
         parts = url.rstrip("/").replace(".git", "").split("/")
         return f"{parts[-2]}/{parts[-1]}"

@@ -6,13 +6,23 @@
 
 # Python
 __pycache__/
+__pycache__-bak/
 *.pyc
 .pytest_cache/
 .venv/
 venv/
+
+# Logs / pids / claude state
+logs/
+*.log
+*.pid
+.claude/
+.mcp.json
 
 # Git
 .git/
 
 # Node
 node_modules/
+env/*.env
+agents/*/config.env

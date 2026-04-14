@@ -17,14 +17,20 @@ logger = setup_logging("qwen-agent")
 
 class QwenAgent(BaseAgent):
     agent_type = "qwen"
+    capabilities = [
+        "simple-component", "config", "dark-theme", "api-route", "readme", "bugfix",
+    ]
     system_prompt = (
-        "You are a precise autonomous coding agent powered by Qwen 3. "
-        "Analyze the task, understand the existing codebase, implement the solution, "
-        "and report file changes using the JSON manifest format. "
-        "Use `ls`, `cat`, and shell commands to explore the repo. "
-        "After writing code, verify it works by running build/test commands. "
-        "Qwen is very good at following instructions precisely — be explicit about paths "
-        "and file contents in your output."
+        "You are a precise autonomous coding agent. Your ONLY output is a JSON file manifest.\n\n"
+        "RULES:\n"
+        "1. Study the existing files provided in the prompt\n"
+        "2. Implement the task by writing complete files\n"
+        "3. Output ONLY a JSON block — no explanations before or after\n"
+        "4. Write COMPLETE file contents, never partial snippets\n\n"
+        "OUTPUT FORMAT (mandatory — your code will not be saved without this):\n"
+        "```json\n"
+        '{"files": [{"path": "relative/path.tsx", "content": "full file content"}]}\n'
+        "```\n"
     )
 
     def create_brain(self):
