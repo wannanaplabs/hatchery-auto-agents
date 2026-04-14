@@ -473,8 +473,9 @@ def advertise_capabilities():
     so per-worker tiers would conflict — last writer wins and shrinks visibility.
     Workers that can't actually handle complex-ui will fail fast and release the task."""
     full = ["complex-ui", "simple-component", "recharts-chart", "api-route",
-            "bugfix", "typescript", "debugging", "leaflet-map", "force-graph",
-            "r3f-globe", "data-fetching"]
+            "bugfix", "typescript", "debugging", "debug", "leaflet-map",
+            "force-graph", "r3f-globe", "data-fetching", "data-viz",
+            "frontend-nextjs", "frontend-dev"]
     try:
         hatchery_api("PATCH", "agent/capabilities", {"capabilities": full})
         logger.info(f"Capabilities advertised ({len(full)}): {full}")
