@@ -33,3 +33,10 @@ agent:
 security:
   command_approval: false
   dangerous_commands_allowed: true
+mcp_servers:
+  hatchery:
+    command: /opt/hermes/venv/bin/hatchery-mcp
+    args: []
+    env:
+      HATCHERY_API_KEY: ${HATCHERY_API_KEY}
+      HATCHERY_BASE_URL: https://hatchery.run

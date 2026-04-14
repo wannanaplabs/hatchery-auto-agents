@@ -67,7 +67,7 @@ for entry in "${PERMS[@]}"; do
     -e MINIMAX_API_KEY="$MINIMAX_API_KEY" \
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
     -e HATCHERY_API_KEY="$HATCHERY_API_KEY" \
-    -e HATCHERY_BASE_URL="${HATCHERY_BASE_URL:-https://hatchery-tau.vercel.app}" \
+    -e HATCHERY_BASE_URL="${HATCHERY_BASE_URL:-https://hatchery.run}" \
     -e GITHUB_TOKEN="$GITHUB_TOKEN" \
     -e OLLAMA_HOST="host.docker.internal:11434" \
     -v hermes-data:/opt/data \

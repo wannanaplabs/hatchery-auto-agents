@@ -19,11 +19,22 @@ Environment variables:
   CODING_MODEL       — Override model name for ollama coding tools
   OLLAMA_HOST        — Ollama host (default: host.docker.internal:11434)
   HATCHERY_API_KEY   — Hatchery API key
+  HATCHERY_BASE_URL  — Hatchery base (default: https://hatchery.run)
   GITHUB_TOKEN       — GitHub token for pushing
+  GITHUB_ORG         — GitHub org for repos/PRs (default: wannanaplabs)
   POLL_INTERVAL      — Seconds between polls (default: 30)
+
+Flow (post-April 2026):
+  1. Poll agent/tasks/available
+  2. If repo has an open auto/* PR: skip (let prior PR land first)
+  3. Claim task, run coding tool, self-heal, scan for stubs
+  4. Push to feature branch auto/<task_id[:8]>
+  5. Create PR via gh CLI
+  6. PATCH task {status: review, pr_url: ...} — Hatchery auto-closes to 'done' on merge
+  7. Fallback: if gh fails, use legacy submit_for_qa
 """
 
-import os, sys, json, time, signal, logging, re, urllib.request, urllib.error
+import os, sys, json, time, signal, logging, re, subprocess, urllib.request, urllib.error
 
 sys.path.insert(0, "/opt/hermes")
 
@@ -32,7 +43,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 WORKER_NAME = os.environ.get("WORKER_NAME", "hermes-worker")
 logger = logging.getLogger(WORKER_NAME)
 
-HATCHERY_BASE = os.environ.get("HATCHERY_BASE_URL", "https://hatchery-tau.vercel.app")
+HATCHERY_BASE = os.environ.get("HATCHERY_BASE_URL", "https://hatchery.run")
 HATCHERY_KEY = os.environ.get("HATCHERY_API_KEY", "")
 CODING_TOOL = os.environ.get("CODING_TOOL", "claude-cli")
 CODING_MODEL = os.environ.get("CODING_MODEL", "")
@@ -240,6 +251,68 @@ def stale_claimed_reaper():
         logger.warning(f"stale_claimed_reaper error: {e}")
 
 
+GITHUB_ORG = os.environ.get("GITHUB_ORG", "wannanaplabs")
+
+
+def extract_slug(repo_url):
+    """Return the repo slug (last path segment, .git stripped) or empty string."""
+    if not repo_url:
+        return ""
+    s = repo_url.rstrip("/").split("/")[-1]
+    if s.endswith(".git"):
+        s = s[:-4]
+    return s
+
+
+def has_open_pr_from_self(slug):
+    """Return True if <org>/<slug> has an open PR on a branch named auto/*."""
+    if not slug:
+        return False
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "list", "--repo", f"{GITHUB_ORG}/{slug}",
+             "--state", "open", "--json", "headRefName,number"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return False
+        prs = json.loads(result.stdout or "[]")
+        return any(pr.get("headRefName", "").startswith("auto/") for pr in prs)
+    except Exception as e:
+        logger.warning(f"has_open_pr_from_self({slug}) failed: {e}")
+        return False
+
+
+def create_pr(slug, branch, title, body):
+    """Create a PR via gh CLI. Returns the PR URL (str) or empty string on failure."""
+    if not slug:
+        return ""
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "create",
+             "--repo", f"{GITHUB_ORG}/{slug}",
+             "--base", "main",
+             "--head", branch,
+             "--title", title[:120],
+             "--body", body[:4000]],
+            capture_output=True, text=True, timeout=30,
+        )
+        url = (result.stdout or "").strip()
+        if result.returncode != 0 or not url.startswith("http"):
+            logger.warning(f"gh pr create failed ({result.returncode}): "
+                           f"stdout={url[:200]!r} stderr={(result.stderr or '')[:200]!r}")
+            return ""
+        return url
+    except Exception as e:
+        logger.warning(f"gh pr create exception: {e}")
+        return ""
+
+
+def kill_dev_servers():
+    """Kill any stray dev-server processes the coding tool may have left running."""
+    os.system("pkill -f 'next dev' 2>/dev/null; pkill -f 'npm run dev' 2>/dev/null")
+
+
 def build_coding_command(task_prompt, workdir):
     """Build the terminal command for the coding tool."""
     escaped = task_prompt.replace("'", "'\\''")
@@ -420,6 +493,10 @@ Execute each step. Report what happened."""
                 "The deployed site MUST show the specific content described in the task's VERIFY section."
             ))
 
+        # Defensive: Claude Code CLI sometimes spawns `next dev` despite instructions.
+        # Kill strays so they don't hold onto the workdir or ports.
+        kill_dev_servers()
+
         # --- Python-side self-heal: enforce conventions the coding tool may have missed ---
         _pin_next_version(workdir)
         _ensure_npmrc_legacy_peer(workdir)
@@ -429,18 +506,24 @@ Execute each step. Report what happened."""
             logger.warning(f"Stub detected in {workdir}: {stub_flag}; releasing task")
             release_task(task_id, f"stub detected: {stub_flag}")
             return
-        # Commit any self-heal edits (allow-empty so we don't fail if nothing changed)
+
+        # --- PR-based flow: push to feature branch, open PR, set task status=review ---
+        # Hatchery's GitHub App auto-closes the task when the PR merges.
+        branch = f"auto/{(task_id or 'notask')[:8]}"
+        # Stage self-heal edits + any prior work into a feature branch commit.
+        # Note: the coding-tool step earlier may have already committed+pushed to main;
+        # checking out -B into a new branch off HEAD keeps those commits on the branch too.
         os.system(
-            f"cd {workdir} && git add -A && "
+            f"cd {workdir} && git checkout -B {branch} && "
+            f"git add -A && "
             f"git -c user.email=frank.quy.nguyen@gmail.com -c user.name='Frank Nguyen' "
-            f"commit --allow-empty -m 'self-heal: pin next/use-client/npmrc' >/dev/null 2>&1 && "
-            f"git push origin main >/dev/null 2>&1"
+            f"commit --allow-empty -m 'self-heal: pin next/use-client/npmrc' >/dev/null 2>&1; "
+            f"git push -u origin {branch} --force-with-lease >/dev/null 2>&1"
         )
 
         # Capture commit SHA and deployed URL best-effort
         commit_sha = ""
         try:
-            import subprocess
             commit_sha = subprocess.check_output(
                 ["git", "-C", workdir, "rev-parse", "--short", "HEAD"], timeout=10
             ).decode().strip()
@@ -453,13 +536,50 @@ Execute each step. Report what happened."""
             f"task={title[:80]}"
         )
 
-        submit_for_qa(task_id, note)
+        pr_title = f"[Hatchery] {title[:60]}"
+        pr_body = (
+            f"Automated PR from worker **{WORKER_NAME}** (coding tool: `{CODING_TOOL}`).\n\n"
+            f"Task: `{task_id}`\n"
+            f"Commit: `{commit_sha or 'n/a'}`\n"
+            f"Deployed URL: {deployed_url or 'n/a'}\n\n"
+            f"---\n\n{desc[:500]}"
+        )
+        pr_url = create_pr(slug, branch, pr_title, pr_body)
 
-        hatchery_api("POST", "agent/messages", {
-            "to_type": "broadcast", "message_type": "status_update",
-            "content": f"[{WORKER_NAME}] Submitted for QA: {title} on {project.get('name', '?')} ({commit_sha})",
-        })
-        logger.info(f"Task submitted for QA: {title}")
+        if pr_url:
+            # Happy path: let Hatchery's auto-close-on-merge drive the task to done.
+            resp, status = hatchery_api(
+                "PATCH", f"agent/tasks/{task_id}",
+                {
+                    "status": "review",
+                    "pr_url": pr_url,
+                    "comment": f"PR opened: {pr_url} — awaiting auto-close on merge. {note}",
+                },
+                return_status=True,
+            )
+            if status in (200, 201, 204):
+                logger.info(f"Task {task_id} marked review with pr_url={pr_url}")
+            else:
+                logger.warning(f"PATCH status=review returned HTTP {status}; falling back to submit_for_qa")
+                submit_for_qa(task_id, f"{note} | pr_url={pr_url}")
+
+            hatchery_api("POST", "agent/messages", {
+                "to_type": "broadcast", "message_type": "status_update",
+                "content": f"[{WORKER_NAME}] PR opened: {title} on {project.get('name', '?')} "
+                           f"({commit_sha}) → {pr_url}",
+            })
+            logger.info(f"PR opened for task: {title} → {pr_url}")
+        else:
+            # Fallback: couldn't create a PR (e.g. one already exists on this branch, or gh CLI missing).
+            # Use legacy submit-for-qa so the task doesn't stay claimed forever.
+            logger.warning(f"PR creation failed for task {task_id}; using legacy submit_for_qa fallback")
+            submit_for_qa(task_id, note)
+            hatchery_api("POST", "agent/messages", {
+                "to_type": "broadcast", "message_type": "status_update",
+                "content": f"[{WORKER_NAME}] Submitted for QA (PR fallback): {title} on "
+                           f"{project.get('name', '?')} ({commit_sha})",
+            })
+            logger.info(f"Task submitted for QA (PR fallback): {title}")
 
     except Exception as e:
         err = f"{type(e).__name__}: {str(e)[:150]}"
@@ -506,9 +626,19 @@ def main():
             tasks = hatchery_api("GET", "agent/tasks/available").get("tasks", [])
             if tasks:
                 task = tasks[0]
-                logger.info(f"Picked up: {task.get('title', '?')}")
-                hatchery_api("POST", f"agent/tasks/{task['id']}/claim")
-                execute_task(task)
+                project = task.get("hatchery_projects", {}) or {}
+                slug = extract_slug(project.get("repo_url", ""))
+                # PR-freshness guard: if the repo already has an open auto/* PR, skip so
+                # we don't race with a pending review and overwrite the branch.
+                if slug and has_open_pr_from_self(slug):
+                    logger.info(
+                        f"Skipping task {task.get('title','')[:50]!r}: "
+                        f"{GITHUB_ORG}/{slug} has an open auto/* PR; waiting for it to land"
+                    )
+                else:
+                    logger.info(f"Picked up: {task.get('title', '?')}")
+                    hatchery_api("POST", f"agent/tasks/{task['id']}/claim")
+                    execute_task(task)
         except Exception as e:
             logger.error(f"Error: {e}")
         for _ in range(poll_interval):
