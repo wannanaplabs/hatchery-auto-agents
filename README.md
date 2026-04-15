@@ -2,6 +2,42 @@
 
 Autonomous AI coding agents that connect to Hatchery, receive jobs via webhook, and execute tasks end-to-end — cloning repos, writing code, deploying, and opening PRs.
 
+## WannaNapLabs Fleet — 19 Projects
+
+The fleet currently manages 18 OSINT visualization apps + 1 feedback system. Live state as of last update:
+
+| # | Project | Status | Live URL | GitHub |
+|---|---|---|---|---|
+| 1 | **seismic-jukebox** — USGS earthquakes sonified | 🟢 LIVE | [seismic-jukebox-wannanaplabs.vercel.app](https://seismic-jukebox-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/seismic-jukebox) |
+| 2 | **vanishing-green** — GLAD deforestation alerts | 🟢 LIVE | [vanishing-green-wannanaplabs.vercel.app](https://vanishing-green-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/vanishing-green) |
+| 3 | **connected** — Multi-source correlation network | 🟢 LIVE | [connected-wannanaplabs.vercel.app](https://connected-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/connected) |
+| 4 | **goop-ops** — Internal analytics dashboard | 🟢 LIVE | [goop-ops-wannanaplabs.vercel.app](https://goop-ops-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/goop-ops) |
+| 5 | **burning-season** — NASA FIRMS wildfire timelapse | 🟢 LIVE | [burning-season-wannanaplabs.vercel.app](https://burning-season-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/burning-season) |
+| 6 | **localized-threats** — ZIP-local safety score | 🟢 LIVE | [localized-threats-wannanaplabs.vercel.app](https://localized-threats-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/localized-threats) |
+| 7 | **shell-game** — ICIJ Panama Papers force graph | 🟢 LIVE | [shell-game-wannanaplabs.vercel.app](https://shell-game-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/shell-game) |
+| 8 | **newsquake** — GDELT news-as-seismograph | 🟢 LIVE | [newsquake-wannanaplabs.vercel.app](https://newsquake-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/newsquake) |
+| 9 | **inside-track** — Politician trade detection | 🟢 LIVE | [inside-track-wannanaplabs.vercel.app](https://inside-track-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/inside-track) |
+| 10 | **narrative-shift** — GDELT media sentiment | 🟢 LIVE | [narrative-shift-wannanaplabs.vercel.app](https://narrative-shift-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/narrative-shift) |
+| 11 | **party-lines** — Dem vs Rep portfolios | 🟢 LIVE | [party-lines-wannanaplabs.vercel.app](https://party-lines-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/party-lines) |
+| 12 | **orbital** — ISS tracker + SpaceX launches | 🟢 LIVE | [orbital-wannanaplabs.vercel.app](https://orbital-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/orbital) |
+| 13 | **living-planet** — GBIF biodiversity observations | 🟢 LIVE | [living-planet-wannanaplabs.vercel.app](https://living-planet-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/living-planet) |
+| 14 | **goop-feedback** — Fleet feedback widget + dashboard | 🟢 LIVE | [goop-feedback-wannanaplabs.vercel.app](https://goop-feedback-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/goop-feedback) |
+| 15 | **pulse** — Earth-as-hospital EKG globe | 🔴 BROKEN | [pulse-wannanaplabs.vercel.app](https://pulse-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/pulse) |
+| 16 | **dark-shipping** — AIS vessel gap detection | 🔴 BROKEN | [dark-shipping-wannanaplabs.vercel.app](https://dark-shipping-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/dark-shipping) |
+| 17 | **anomaly-board** — Multi-source anomaly cards | 🔴 BROKEN | [anomaly-board-wannanaplabs.vercel.app](https://anomaly-board-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/anomaly-board) |
+| 18 | **the-hill** — Capitol hemicycle + trade flashes | 🔴 BROKEN | [the-hill-wannanaplabs.vercel.app](https://the-hill-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/the-hill) |
+| 19 | **toxic-clouds** — PurpleAir AQI map | 🔴 BROKEN | [toxic-clouds-wannanaplabs.vercel.app](https://toxic-clouds-wannanaplabs.vercel.app) | [repo](https://github.com/wannanaplabs/toxic-clouds) |
+
+**Current tally: 14 LIVE · 5 BROKEN · 19 total.** Broken projects have `[FIX-DEPLOY]` tasks queued — fleet workers are iterating fixes.
+
+### Related dashboards
+- **Hatchery** (task queue + agent coordination) — [hatchery.run](https://hatchery.run)
+- **goop-feedback dashboard** (user-reported bugs/suggestions triage) — [goop-feedback-wannanaplabs.vercel.app](https://goop-feedback-wannanaplabs.vercel.app)
+- **GitHub org** — [github.com/wannanaplabs](https://github.com/wannanaplabs)
+
+---
+
+
 ## Agents
 
 | Agent | Brain | Best For |
