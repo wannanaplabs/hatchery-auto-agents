@@ -391,19 +391,25 @@ def execute_task(task):
     logger.info(f"Executing: {title!r} on {slug} via OpenHands [model={LLM_MODEL}]")
 
     try:
-        # Force HTTPS clone URL so the credential helper works (matches Hermes behavior)
+        # Force HTTPS with embedded token — credential helper unreliable in container
         https_url = repo_url
         if repo_url.startswith("git@github.com:"):
             https_url = "https://github.com/" + repo_url.split(":", 1)[1]
+        github_token = os.environ.get("GITHUB_TOKEN", "")
+        if github_token and https_url.startswith("https://github.com/"):
+            authed_url = https_url.replace("https://github.com/", f"https://{github_token}@github.com/")
+        else:
+            authed_url = https_url
 
         if not os.path.exists(workdir):
-            rc = os.system(f"git clone --depth 1 {https_url} {workdir}")
+            rc = os.system(f"git clone --depth 1 {authed_url} {workdir}")
             if rc != 0:
-                release_task(task_id, f"git clone failed for {https_url}")
+                release_task(task_id, f"git clone failed for {slug}")
                 return
         else:
-            os.system(f"cd {workdir} && git fetch origin main >/dev/null 2>&1 && "
-                      f"git reset --hard origin/main >/dev/null 2>&1")
+            # Ensure remote has token for subsequent fetch/push
+            os.system(f"cd {workdir} && git remote set-url origin {authed_url} 2>/dev/null && "
+                      f"git fetch origin 2>/dev/null")
 
         if not LLM_API_KEY:
             release_task(task_id, "missing LLM_API_KEY env var")

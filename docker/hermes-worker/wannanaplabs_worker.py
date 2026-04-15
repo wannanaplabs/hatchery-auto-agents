@@ -401,11 +401,23 @@ def execute_task(task):
 
     logger.info(f"Executing: {title} on {slug} [coding: {CODING_TOOL}]")
 
+    # Embed GITHUB_TOKEN in the clone URL — credential helper isn't firing
+    # reliably across all containers (observed in Hermes + OpenHands).
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    authed_url = repo_url
+    if github_token and repo_url.startswith("https://github.com/"):
+        authed_url = repo_url.replace("https://github.com/", f"https://{github_token}@github.com/")
+
     try:
         if not os.path.exists(workdir):
-            os.system(f"git clone --depth 1 {repo_url} {workdir}")
+            rc = os.system(f"git clone --depth 1 {authed_url} {workdir} 2>&1")
+            if rc != 0:
+                release_task(task_id, f"git clone failed for {slug}")
+                return
         else:
-            os.system(f"cd {workdir} && git pull origin main 2>/dev/null")
+            # Ensure remote has the token for subsequent fetch/push
+            os.system(f"cd {workdir} && git remote set-url origin {authed_url} 2>/dev/null")
+            os.system(f"cd {workdir} && git fetch origin 2>/dev/null")
 
         # NEW: fetch project-level context (digest + spec) and prepend to prompt
         project_context = fetch_project_context(project_id)
@@ -528,18 +540,27 @@ Execute each step. Report what happened."""
         # Without this, `git checkout -B auto/X` points at the same HEAD as main →
         # `gh pr create` fails "no commits between main and auto/X" → zombie loop.
         branch = f"auto/{(task_id or 'notask')[:8]}"
+        # Detect remote default branch (may be 'main', 'master', or a feat branch)
+        default_branch = "main"
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", workdir, "symbolic-ref", "refs/remotes/origin/HEAD"],
+                timeout=10, stderr=subprocess.DEVNULL,
+            ).decode().strip()
+            if out:
+                default_branch = out.rsplit("/", 1)[-1]
+        except Exception:
+            pass
+        # Safe commit message: shell-escape the title
+        safe_title = title.replace("'", "'\\''")[:60]
         os.system(
             f"cd {workdir} && "
-            # Fetch latest main so we know where to reset TO
-            f"git fetch origin main >/dev/null 2>&1 && "
-            # Soft-reset to origin/main: undoes local commits, keeps file changes staged
-            f"git reset --soft origin/main >/dev/null 2>&1 && "
-            # Now checkout the feature branch (diverges from main with staged changes)
+            f"git fetch origin {default_branch} >/dev/null 2>&1 && "
+            f"git reset --soft origin/{default_branch} >/dev/null 2>&1 && "
             f"git checkout -B {branch} && "
             f"git add -A && "
-            # Make ONE commit on the feature branch with all the work
             f"git -c user.email=frank.quy.nguyen@gmail.com -c user.name='Frank Nguyen' "
-            f"commit -m 'feat: {title[:60]}' >/dev/null 2>&1; "
+            f"commit -m 'feat: {safe_title}' >/dev/null 2>&1; "
             f"git push -u origin {branch} --force-with-lease >/dev/null 2>&1"
         )
 
