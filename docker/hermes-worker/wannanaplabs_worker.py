@@ -487,20 +487,38 @@ DESCRIPTION:
 
 WORKING DIRECTORY: {workdir}
 
-CRITICAL CONVENTIONS (apply BEFORE coding):
-- Next.js 15 App Router: add `"use client"` to any .tsx file using useState/useEffect/onClick/useRouter
-- Pin next@15.5.15 in package.json (Vercel blocks CVE-2025-66478 on older versions)
-- Add `legacy-peer-deps=true` to .npmrc if using react-leaflet or similar React 18-only deps
-- Tailwind v4: no tailwind.config.js; use `@import "tailwindcss";` in globals.css
-- Dark theme: `bg-[#0a0a0a]`, cards `bg-[#141414]`, text `text-white/90`
-- NEVER submit a stub: if you can't implement, call the task complete without committing, let another agent retry
+READ FIRST (mandatory before any write):
+1. read_file({workdir}/package.json) — what's installed?
+2. read_file({workdir}/src/app/layout.tsx) — global wiring + branding header
+3. read_file({workdir}/src/app/page.tsx) — current home view (what you're replacing/extending)
+4. ls {workdir}/src/components/ — what exists already, REUSE don't recreate
+5. If task touches an API: `grep -r "from(\\"" {workdir}/src/app/api/` to learn ACTUAL table names — never guess
+6. If unsure of any package's API → call mcp__context7__resolve-library-id then get-library-docs. Your training data is wrong about Next.js 15, React 19, Tailwind v4.
+
+You have skills loaded at /root/.claude/skills/:
+- codebase-awareness.md — read-before-write rules (esp. for API routes)
+- product-design.md — hero-first, never-flat, required UX states
+- frontend-design.md — canonical 2026 package picks per category
+
+CRITICAL CONVENTIONS:
+- Next.js 15 App Router: add `"use client"` to any .tsx using useState/useEffect/onClick/useRouter
+- Pin next@15.5.15 (Vercel CVE-2025-66478)
+- `.npmrc`: legacy-peer-deps=true
+- Tailwind v4: no config file; `@import "tailwindcss"` in globals.css
+- Dark theme: bg-[#0a0a0a], cards bg-[#141414], text text-white/90
+- Branding header in layout.tsx (per product-design.md)
+- Feedback widget: `<script async src="https://goop-feedback.vercel.app/widget.js" data-slug="..."/>`
 
 PRE-STAGE SELF-CHECK (do this after coding, before `git add -A`):
-1. Open package.json — ensure `"next": "15.5.15"`.
-2. Open src/app/page.tsx — if it has `useState|useEffect|onClick` and doesn't start with `"use client"`, prepend it.
-3. Grep src/ for `return <div></div>`, `return <div />`, `// TODO`, `// In production`. If any found, report "stub detected" and exit WITHOUT staging.
-4. Run `npm install --legacy-peer-deps && npm run build`. If it fails, fix; if after 2 attempts it still fails, report failure and exit — don't stage broken code.
-5. Only after all 4 pass: `git add -A`. STOP THERE. Worker layer commits + pushes + opens PR.
+1. package.json: `"next": "15.5.15"` (exact, no caret)
+2. .npmrc has `legacy-peer-deps=true`
+3. Any .tsx using hooks starts with `"use client";`
+4. Grep src/ for stubs: `return <div></div>`, `// TODO`, `// In production`, `Coming soon`. If found, exit WITHOUT staging.
+5. `npm install --legacy-peer-deps && npm run build` exits 0
+6. **CONTENT VERIFY**: `npm run start &` then `sleep 5 && curl -s localhost:3000 | wc -c`. Page MUST be > 5000 bytes. Then `curl -s localhost:3000 | grep -E "<keyword>"` for the task's domain keyword (earthquake|AQI|deforestation|trade|etc). If <5KB or no keyword match → page is blank, fix it.
+7. Only after all 6 pass: `git add -A`. STOP. Worker layer commits + pushes + opens PR.
+
+If after 2 build/verify attempts the page is still blank or stub: DO NOT stage. Report "blank output despite spec" and exit — let another agent retry.
 
 VERIFICATION CRITERIA (parse from the DESCRIPTION above; the task ends with `VERIFY: ...` — that's what must pass before submit-for-qa).
 
@@ -532,6 +550,35 @@ Execute each step. Report what happened."""
             logger.warning(f"Stub detected in {workdir}: {stub_flag}; releasing task")
             release_task(task_id, f"stub detected: {stub_flag}")
             return
+
+        # --- Python-side BLANK-OUTPUT GATE: hard fail if rendered page is empty ---
+        # Even if build passes and stubs aren't detected, the page may render
+        # nothing (LLM wrote a component that returns null, or page imports
+        # nothing meaningful). Boot `next start` headlessly, curl /, check size
+        # AND check that page.tsx's source contains at least 200 non-whitespace
+        # chars after `export default function`. <2KB rendered = blank shell.
+        try:
+            page_path = f"{workdir}/src/app/page.tsx"
+            if os.path.exists(page_path):
+                with open(page_path) as f: page_src = f.read()
+                # Crude content check: page.tsx body should have substance
+                body = re.sub(r'\s+', '', page_src)
+                if len(body) < 600:
+                    logger.warning(f"page.tsx is too thin ({len(body)} non-ws chars); blank-output gate failed")
+                    release_task(task_id, f"page.tsx body too thin ({len(body)} chars) — likely blank")
+                    return
+                # Page MUST import or use at least one of: data fetching, React hook, JSX with > 3 elements
+                has_signal = (
+                    "useState" in page_src or "useEffect" in page_src or
+                    "fetch(" in page_src or "import " in page_src
+                )
+                jsx_elem_count = len(re.findall(r"<[A-Z][a-zA-Z]*", page_src))
+                if not has_signal or jsx_elem_count < 2:
+                    logger.warning(f"page.tsx has no fetch/hooks and only {jsx_elem_count} component refs; likely empty")
+                    release_task(task_id, f"page.tsx looks blank: hooks/fetch={has_signal}, components={jsx_elem_count}")
+                    return
+        except Exception as e:
+            logger.debug(f"blank-output gate skipped: {e}")
 
         # --- PR-based flow: push to feature branch, open PR, set task status=review ---
         # Hatchery's GitHub App auto-closes the task when the PR merges.
