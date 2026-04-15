@@ -55,9 +55,12 @@ RUN /opt/hermes/venv/bin/pip install --no-cache-dir \
       git+https://github.com/wannanaplabs/hatchery-mcp.git \
     || echo "hatchery-mcp install failed — worker will still run without MCP tools"
 
-# Register hatchery-mcp with the Claude Code CLI (per-user config at /root/.claude.json).
+# Register MCPs with Claude Code CLI (per-user config at /root/.claude.json).
+#  - hatchery: task + project coordination (our custom MCP)
+#  - context7: Upstash's always-current library docs fetcher — kills stale
+#    training data on package APIs (Next.js, React, tremor, motion, etc.)
 # Env vars are resolved by Claude CLI at runtime from the container environment.
-RUN mkdir -p /root && printf '%s' '{"mcpServers":{"hatchery":{"command":"/opt/hermes/venv/bin/hatchery-mcp","env":{"HATCHERY_API_KEY":"${HATCHERY_API_KEY}","HATCHERY_BASE_URL":"https://hatchery.run"}}}}' > /root/.claude.json
+RUN mkdir -p /root && printf '%s' '{"mcpServers":{"hatchery":{"command":"/opt/hermes/venv/bin/hatchery-mcp","env":{"HATCHERY_API_KEY":"${HATCHERY_API_KEY}","HATCHERY_BASE_URL":"https://hatchery.run"}},"context7":{"command":"npx","args":["-y","@upstash/context7-mcp@latest"]}}}' > /root/.claude.json
 
 # Volumes
 ENV HERMES_HOME=/opt/data
@@ -68,6 +71,9 @@ VOLUME ["/opt/data", "/repos"]
 COPY config.yaml /opt/default-config.yaml
 COPY wannanaplabs_worker.py /opt/hermes/wannanaplabs_worker.py
 COPY entrypoint.sh /entrypoint.sh
+# Skills: design/convention docs Claude Code CLI picks up automatically when
+# placed under /root/.claude/skills/ (per Claude Code docs).
+COPY skills/ /root/.claude/skills/
 RUN chmod +x /entrypoint.sh
 
 # Git defaults
