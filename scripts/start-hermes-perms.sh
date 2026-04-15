@@ -55,6 +55,21 @@ for entry in "${PERMS[@]}"; do
       ;;
   esac
 
+  # Each worker gets its own per-agent Hatchery key — so /release, last_failed_by,
+  # and claim cooldowns are scoped PER AGENT, not shared. This is the root fix
+  # for the cross-fleet deadlock we hit when all workers used one Goop key.
+  # Keys live in agents/<type>/config.env (gitignored, one-shot agent identities).
+  case "$name" in
+    hermes-claude)    worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/claude-code/config.env" 2>/dev/null | cut -d= -f2) ;;
+    hermes-self)      worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/minimax/config.env" 2>/dev/null | cut -d= -f2) ;;
+    hermes-deepseek)  worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/deepseek/config.env" 2>/dev/null | cut -d= -f2) ;;
+    hermes-qwen)      worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/qwen/config.env" 2>/dev/null | cut -d= -f2) ;;
+    hermes-gemma)     worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/gemma/config.env" 2>/dev/null | cut -d= -f2) ;;
+    *)                worker_htch_key="$HATCHERY_API_KEY" ;;
+  esac
+  # Fallback to shared Goop key if per-agent key file missing
+  [ -z "$worker_htch_key" ] && worker_htch_key="$HATCHERY_API_KEY"
+
   # Remove existing container if any
   docker rm -f "$name" >/dev/null 2>&1 || true
 
@@ -66,13 +81,13 @@ for entry in "${PERMS[@]}"; do
     -e ORCHESTRATOR_KEY="$orch_key" \
     -e MINIMAX_API_KEY="$MINIMAX_API_KEY" \
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-    -e HATCHERY_API_KEY="$HATCHERY_API_KEY" \
+    -e HATCHERY_API_KEY="$worker_htch_key" \
     -e HATCHERY_BASE_URL="${HATCHERY_BASE_URL:-https://hatchery.run}" \
     -e GITHUB_TOKEN="$GITHUB_TOKEN" \
     -e OLLAMA_HOST="host.docker.internal:11434" \
     -v hermes-data:/opt/data \
     -v hermes-repos:/repos \
-    wannanaplabs/hermes-worker > /dev/null && echo "started $name (brain=$brain coder=$coder)"
+    wannanaplabs/hermes-worker > /dev/null && echo "started $name (brain=$brain coder=$coder key=${worker_htch_key:0:20}...)"
 done
 
 echo

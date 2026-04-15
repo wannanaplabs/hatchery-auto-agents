@@ -52,6 +52,14 @@ for entry in "${PERMS[@]}"; do
     continue
   fi
 
+  # Per-agent Hatchery key (scoped /release, last_failed_by, cooldown)
+  case "$name" in
+    openhands-minimax) worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/qwen/config.env" 2>/dev/null | cut -d= -f2) ;;
+    openhands-claude)  worker_htch_key=$(grep '^HATCHERY_API_KEY=' "$(dirname "$0")/../agents/gemma/config.env" 2>/dev/null | cut -d= -f2) ;;
+    *)                 worker_htch_key="$HATCHERY_API_KEY" ;;
+  esac
+  [ -z "$worker_htch_key" ] && worker_htch_key="$HATCHERY_API_KEY"
+
   docker rm -f "$name" >/dev/null 2>&1 || true
 
   docker run -d --name "$name" --restart unless-stopped \
@@ -61,7 +69,7 @@ for entry in "${PERMS[@]}"; do
     -e LLM_BASE_URL="$base_url" \
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
     -e MINIMAX_API_KEY="${MINIMAX_API_KEY:-}" \
-    -e HATCHERY_API_KEY="$HATCHERY_API_KEY" \
+    -e HATCHERY_API_KEY="$worker_htch_key" \
     -e HATCHERY_BASE_URL="${HATCHERY_BASE_URL:-https://hatchery.run}" \
     -e GITHUB_TOKEN="$GITHUB_TOKEN" \
     -e GITHUB_ORG="${GITHUB_ORG:-wannanaplabs}" \
@@ -70,7 +78,7 @@ for entry in "${PERMS[@]}"; do
     -v openhands-repos:/repos \
     -v openhands-data:/opt/data \
     wannanaplabs/openhands-worker > /dev/null && \
-    echo "started $name (model=$model)"
+    echo "started $name (model=$model key=${worker_htch_key:0:20}...)"
 done
 
 echo
