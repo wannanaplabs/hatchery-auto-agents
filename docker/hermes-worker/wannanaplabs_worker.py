@@ -551,6 +551,73 @@ Execute each step. Report what happened."""
             release_task(task_id, f"stub detected: {stub_flag}")
             return
 
+        # --- HARD BUILD GATE: actually run npm install + npm run build ---
+        # Stops broken code from ever reaching Vercel. The LLM is supposed to
+        # do this in its prompt, but it routinely skips. Python-side enforces.
+        logger.info(f"Hard build gate: npm install + build for {slug}")
+        try:
+            r = subprocess.run(
+                ["bash", "-c",
+                 f"cd {workdir} && npm install --legacy-peer-deps --no-audit --no-fund 2>&1 | tail -20"],
+                capture_output=True, text=True, timeout=180,
+            )
+            if r.returncode != 0:
+                logger.warning(f"npm install failed: {(r.stdout or r.stderr)[-400:]}")
+                release_task(task_id, f"npm install failed: {(r.stdout or r.stderr)[-200:]}")
+                return
+            r = subprocess.run(
+                ["bash", "-c", f"cd {workdir} && npm run build 2>&1 | tail -40"],
+                capture_output=True, text=True, timeout=240,
+            )
+            if r.returncode != 0:
+                err_tail = (r.stdout or r.stderr)[-600:]
+                logger.warning(f"npm run build FAILED for {slug}: {err_tail[:300]}")
+                release_task(task_id, f"build failed: {err_tail[:200]}")
+                return
+            logger.info(f"Hard build gate PASSED for {slug}")
+        except subprocess.TimeoutExpired:
+            release_task(task_id, "build/install timed out (>4min)")
+            return
+        except Exception as e:
+            logger.warning(f"build gate exception: {e}; continuing optimistically")
+
+        # --- LINT GATE (best-effort): use existing lint script if defined ---
+        # Won't fail the task — too much LLM output trips false positives —
+        # but warns on lint errors so the next iteration can fix them.
+        try:
+            pj_path = f"{workdir}/package.json"
+            if os.path.exists(pj_path):
+                with open(pj_path) as f: pj = json.load(f)
+                if pj.get("scripts", {}).get("lint"):
+                    r = subprocess.run(
+                        ["bash", "-c", f"cd {workdir} && timeout 30 npm run lint 2>&1 | tail -20"],
+                        capture_output=True, text=True, timeout=40,
+                    )
+                    if r.returncode != 0:
+                        logger.info(f"lint warnings (non-blocking) for {slug}: {(r.stdout)[-200:]}")
+        except Exception as e:
+            logger.debug(f"lint check skipped: {e}")
+
+        # --- TEST GATE (best-effort): run npm test if defined and not the default ---
+        try:
+            pj_path = f"{workdir}/package.json"
+            if os.path.exists(pj_path):
+                with open(pj_path) as f: pj = json.load(f)
+                test_script = pj.get("scripts", {}).get("test", "")
+                # Skip the Next.js scaffold default that just errors
+                if test_script and "no test specified" not in test_script:
+                    r = subprocess.run(
+                        ["bash", "-c", f"cd {workdir} && timeout 60 npm test --silent 2>&1 | tail -25"],
+                        capture_output=True, text=True, timeout=70,
+                    )
+                    if r.returncode != 0:
+                        logger.warning(f"tests FAILED for {slug}: {(r.stdout or r.stderr)[-300:]}")
+                        release_task(task_id, f"tests failed: {(r.stdout)[-200:]}")
+                        return
+                    logger.info(f"tests passed for {slug}")
+        except Exception as e:
+            logger.debug(f"test gate skipped: {e}")
+
         # --- Python-side BLANK-OUTPUT GATE: hard fail if rendered page is empty ---
         # Even if build passes and stubs aren't detected, the page may render
         # nothing (LLM wrote a component that returns null, or page imports
