@@ -452,14 +452,18 @@ def execute_task(task):
 2. terminal(command="{coding_cmd}", timeout=300)
 3. terminal(command="cd {workdir} && npm run build", timeout=120)
 4. If build fails: terminal(command="{fix_cmd}", timeout=300)
-5. terminal(command="cd {workdir} && git add -A && git commit --author='Frank Nguyen <frank.quy.nguyen@gmail.com>' -m 'feat: {title[:50]}' && git push origin main", timeout=60)"""
+5. STAGE ONLY: terminal(command="cd {workdir} && git add -A", timeout=10).
+   DO NOT commit. DO NOT push. DO NOT push to main. DO NOT use `git commit` or `git push`.
+   The Python worker layer will create a feature branch, commit your staged changes,
+   push to that branch, and open a PR. Pushing to main directly breaks the PR flow."""
         else:
             steps = f"""STEPS (you write the code yourself using file tools):
 1. read_file(path="{workdir}/src/app/page.tsx") and read_file(path="{workdir}/package.json")
 2. Write code using write_file or patch tools
 3. terminal(command="cd {workdir} && npm install && npm run build", timeout=120)
 4. If build fails, fix the files
-5. terminal(command="cd {workdir} && git add -A && git commit --author='Frank Nguyen <frank.quy.nguyen@gmail.com>' -m 'feat: {title[:50]}' && git push origin main", timeout=60)"""
+5. STAGE ONLY: terminal(command="cd {workdir} && git add -A", timeout=10).
+   DO NOT commit. DO NOT push. The Python worker layer handles git/PR work."""
 
         context_block = f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
         prompt = f"""{context_block}Execute this coding task:
@@ -478,12 +482,12 @@ CRITICAL CONVENTIONS (apply BEFORE coding):
 - Dark theme: `bg-[#0a0a0a]`, cards `bg-[#141414]`, text `text-white/90`
 - NEVER submit a stub: if you can't implement, call the task complete without committing, let another agent retry
 
-PRE-COMMIT SELF-CHECK (do this after coding, before git commit):
+PRE-STAGE SELF-CHECK (do this after coding, before `git add -A`):
 1. Open package.json — ensure `"next": "15.5.15"`.
 2. Open src/app/page.tsx — if it has `useState|useEffect|onClick` and doesn't start with `"use client"`, prepend it.
-3. Grep src/ for `return <div></div>`, `return <div />`, `// TODO`, `// In production`. If any found, DON'T commit — report "stub detected" and exit with failure.
-4. Run `npm install --legacy-peer-deps && npm run build`. If it fails, fix; if after 2 attempts it still fails, report failure and exit — don't commit broken code.
-5. Only after all 4 pass: git add -A && git commit && git push.
+3. Grep src/ for `return <div></div>`, `return <div />`, `// TODO`, `// In production`. If any found, report "stub detected" and exit WITHOUT staging.
+4. Run `npm install --legacy-peer-deps && npm run build`. If it fails, fix; if after 2 attempts it still fails, report failure and exit — don't stage broken code.
+5. Only after all 4 pass: `git add -A`. STOP THERE. Worker layer commits + pushes + opens PR.
 
 VERIFICATION CRITERIA (parse from the DESCRIPTION above; the task ends with `VERIFY: ...` — that's what must pass before submit-for-qa).
 
