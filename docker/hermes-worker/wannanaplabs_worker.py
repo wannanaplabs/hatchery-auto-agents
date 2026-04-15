@@ -522,17 +522,38 @@ Execute each step. Report what happened."""
 
         # --- PR-based flow: push to feature branch, open PR, set task status=review ---
         # Hatchery's GitHub App auto-closes the task when the PR merges.
+        # CRITICAL: reset any commits the coding tool made to main, keeping their
+        # changes staged. This ensures our feature branch has commits to PR.
+        # Without this, `git checkout -B auto/X` points at the same HEAD as main →
+        # `gh pr create` fails "no commits between main and auto/X" → zombie loop.
         branch = f"auto/{(task_id or 'notask')[:8]}"
-        # Stage self-heal edits + any prior work into a feature branch commit.
-        # Note: the coding-tool step earlier may have already committed+pushed to main;
-        # checking out -B into a new branch off HEAD keeps those commits on the branch too.
         os.system(
-            f"cd {workdir} && git checkout -B {branch} && "
+            f"cd {workdir} && "
+            # Fetch latest main so we know where to reset TO
+            f"git fetch origin main >/dev/null 2>&1 && "
+            # Soft-reset to origin/main: undoes local commits, keeps file changes staged
+            f"git reset --soft origin/main >/dev/null 2>&1 && "
+            # Now checkout the feature branch (diverges from main with staged changes)
+            f"git checkout -B {branch} && "
             f"git add -A && "
+            # Make ONE commit on the feature branch with all the work
             f"git -c user.email=frank.quy.nguyen@gmail.com -c user.name='Frank Nguyen' "
-            f"commit --allow-empty -m 'self-heal: pin next/use-client/npmrc' >/dev/null 2>&1; "
+            f"commit -m 'feat: {title[:60]}' >/dev/null 2>&1; "
             f"git push -u origin {branch} --force-with-lease >/dev/null 2>&1"
         )
+
+        # Pre-PR type check gate: tsc --noEmit catches stubs (missing props, bad imports)
+        # that build doesn't surface until late. Runs in ~5s.
+        try:
+            rc = subprocess.run(
+                ["npx", "--yes", "--package=typescript@5", "--", "tsc", "--noEmit",
+                 "--project", workdir],
+                capture_output=True, text=True, timeout=60,
+            ).returncode
+            if rc != 0:
+                logger.warning(f"tsc --noEmit failed for {slug}; continuing but PR may fail Vercel build")
+        except Exception as e:
+            logger.debug(f"tsc check skipped: {e}")
 
         # Capture commit SHA and deployed URL best-effort
         commit_sha = ""
