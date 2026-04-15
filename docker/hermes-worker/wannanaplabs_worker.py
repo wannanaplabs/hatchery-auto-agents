@@ -201,21 +201,22 @@ def submit_for_qa(task_id, note):
 
 
 def release_task(task_id, reason):
-    """Release a claimed task back to the pool.
+    """Release a claimed task back to the pool via POST /release.
 
-    Uses PATCH status=ready instead of POST /release because the latter sets
-    last_failed_by=<agent_id>, which makes the task invisible to the SAME
-    agent via /tasks/available. Since all workers share the Goop identity,
-    /release would create a perma-block. PATCH status=ready has no blame."""
-    try:
-        hatchery_api("PATCH", f"agent/tasks/{task_id}", {
-            "status": "ready",
-            "comment": f"released by {WORKER_NAME}: {reason[:200]}",
-            "assignee_agent_id": None,
-        })
+    Hatchery's auth tightening made bare PATCH return 401 for non-assignees.
+    POST /release still works (200 OK) but sets last_failed_by=<agent_id>,
+    which blocks the same agent from re-claiming via /tasks/available. Given
+    all workers share the Goop identity, this creates a cooldown — not ideal
+    but at least the release succeeds. Alternative: PATCH via /status subroute
+    (404s if not assignee) or fix Hatchery's API auth."""
+    resp, status = hatchery_api(
+        "POST", f"agent/tasks/{task_id}/release",
+        {"comment": f"[{WORKER_NAME}] {reason[:200]}"}, return_status=True,
+    )
+    if status in (200, 201, 204):
         logger.info(f"Released task {task_id}: {reason[:80]}")
-    except Exception as e:
-        logger.warning(f"Release failed for {task_id}: {e}")
+    else:
+        logger.warning(f"Release returned HTTP {status} for {task_id}")
 
 
 def request_human(task_id, reason):

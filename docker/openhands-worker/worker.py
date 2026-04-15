@@ -107,16 +107,15 @@ def fetch_project_context(project_id):
 
 
 def release_task(task_id, reason):
-    """PATCH status=ready — same rationale as Hermes (avoid /release blame-block)."""
-    try:
-        hatchery_api("PATCH", f"agent/tasks/{task_id}", {
-            "status": "ready",
-            "comment": f"released by {WORKER_NAME}: {reason[:200]}",
-            "assignee_agent_id": None,
-        })
+    """POST /release — bare PATCH returns 401 after Hatchery auth tightening."""
+    resp, status = hatchery_api(
+        "POST", f"agent/tasks/{task_id}/release",
+        {"comment": f"[{WORKER_NAME}] {reason[:200]}"}, return_status=True,
+    )
+    if status in (200, 201, 204):
         logger.info(f"Released task {task_id}: {reason[:80]}")
-    except Exception as e:
-        logger.warning(f"Release failed for {task_id}: {e}")
+    else:
+        logger.warning(f"Release returned HTTP {status} for {task_id}")
 
 
 def submit_for_qa(task_id, note):
