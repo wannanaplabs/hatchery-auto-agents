@@ -452,7 +452,7 @@ def execute_task(task):
             base_url=orch_url,
             api_key=orch_key,
             model=orch_model,
-            max_iterations=25,
+            max_iterations=75,  # bumped from 25 — observed sessions blowing budget on cold npm installs + build retries
             enabled_toolsets=["terminal", "file"],
             quiet_mode=True,
             tool_delay=0.5,
